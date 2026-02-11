@@ -1,5 +1,7 @@
 # CtrlHGen
-This is the code repo for *Controllable Logical Hypothesis Generation for Abductive Reasoning in Knowledge Graphs*
+
+
+This is the official code repository for **[Controllable Logical Hypothesis Generation for Abductive Reasoning in Knowledge Graphs]** (ICLR 2026).
 
 # Environment
 
@@ -72,3 +74,10 @@ bash scripts/optim-test/wn-g2.sh
 # Citation
 
 Welcome to cite our work!
+
+@article{gao2025controllable,
+  title={Controllable Logical Hypothesis Generation for Abductive Reasoning in Knowledge Graphs},
+  author={Gao, Yisen and Bai, Jiaxin and Zheng, Tianshi and Sun, Qingyun and Zhang, Ziwei and Li, Jianxin and Song, Yangqiu and Fu, Xingcheng},
+  journal={arXiv preprint arXiv:2505.20948},
+  year={2025}
+}

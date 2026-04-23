@@ -11,8 +11,19 @@ special_tokens:
     "i": 15
     "u": 16
     "n": 17
+    "1p": 18
+    "2p": 19
+    "3p": 20
+    "4p": 21
+    "1e": 22
+    "2e": 23
+    "3e": 24
+    "4e": 25
+    "5e": 26
+    "with": 27
 offset: 100
-ans_len: 32
+# ans_len: 32
+ans_len: 64
 qry_len: 128
 act_len: 32
 act_max_var: 16

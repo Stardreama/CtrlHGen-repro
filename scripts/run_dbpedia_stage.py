@@ -24,10 +24,15 @@ STAGES = {
 }
 
 DEFAULT_STEPS = ["sample", "train_uncond", "train_pattern", "test_baseline", "test_rerank"]
+DEFAULT_RERANK_TEST_PROPORTIONS = [0.1, 0.25, 1.0]
 
 
 def shell_join(cmd: list[str]) -> str:
     return " ".join(shlex.quote(part) for part in cmd)
+
+
+def format_proportions(proportions: list[float]) -> str:
+    return ", ".join(str(proportion) for proportion in proportions)
 
 
 def run(cmd: list[str], dry_run: bool) -> None:
@@ -171,10 +176,10 @@ def run_test_baseline(args: argparse.Namespace, scale: str) -> None:
     ], args.dry_run)
 
 
-def run_test_rerank(args: argparse.Namespace, scale: str) -> None:
-    score = score_path(args, scale, args.rerank_test_proportion, rerank_k=args.rerank_k)
-    candidates = candidates_path(args, scale, args.rerank_test_proportion)
-    if maybe_skip("test_rerank", [score, candidates], args.force):
+def run_test_rerank_once(args: argparse.Namespace, scale: str, test_proportion: float) -> None:
+    score = score_path(args, scale, test_proportion, rerank_k=args.rerank_k)
+    candidates = candidates_path(args, scale, test_proportion)
+    if maybe_skip(f"test_rerank({test_proportion})", [score, candidates], args.force):
         return
     run([
         sys.executable, "-m", "akgr.abduction_model.main",
@@ -184,7 +189,7 @@ def run_test_rerank(args: argparse.Namespace, scale: str) -> None:
         "--tuning",
         "-r", str(args.pattern_epochs),
         "--test_split", "test",
-        "--test_proportion", str(args.rerank_test_proportion),
+        "--test_proportion", str(test_proportion),
         "--test_top_k", "0",
         "--overwrite_batchsize", str(args.batch_size),
         "--constrained", "True",
@@ -194,13 +199,18 @@ def run_test_rerank(args: argparse.Namespace, scale: str) -> None:
     ], args.dry_run)
 
 
+def run_test_rerank(args: argparse.Namespace, scale: str) -> None:
+    for test_proportion in args.rerank_test_proportions:
+        run_test_rerank_once(args, scale, test_proportion)
+
+
 def print_stage_info(args: argparse.Namespace, scale: str) -> None:
     expected = STAGES[args.stage]["expected"]
     print(f"# Stage: {args.stage} ({scale})")
     print(f"# Expected rows: train={expected['train']}, valid={expected['valid']}, test={expected['test']}")
     print(f"# Steps: {', '.join(args.steps)}")
     print(f"# Epochs: unconditional={args.uncond_epochs}, pattern={args.pattern_epochs}")
-    print(f"# Test: baseline proportion={args.baseline_test_proportion}, rerank proportion={args.rerank_test_proportion}, rerank_k={args.rerank_k}")
+    print(f"# Test: baseline proportion={args.baseline_test_proportion}, rerank proportions={format_proportions(args.rerank_test_proportions)}, rerank_k={args.rerank_k}")
     if args.dry_run:
         print("# Dry run: commands will be printed only")
 
@@ -221,12 +231,21 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--uncond-epochs", type=int, default=20)
     parser.add_argument("--pattern-epochs", type=int, default=40)
     parser.add_argument("--baseline-test-proportion", type=float, default=1.0)
-    parser.add_argument("--rerank-test-proportion", type=float, default=0.1)
+    parser.add_argument("--rerank-test-proportion", type=float, default=None, help="deprecated single rerank proportion override")
+    parser.add_argument("--rerank-test-proportions", nargs="+", type=float, default=None)
     parser.add_argument("--rerank-k", type=int, default=4)
     parser.add_argument("--rerank-alpha", type=float, default=0.5)
     parser.add_argument("--force", action="store_true", help="rerun steps even when expected outputs already exist")
     parser.add_argument("--dry-run", action="store_true", help="print commands without executing them")
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.rerank_test_proportion is not None and args.rerank_test_proportions is not None:
+        parser.error("use either --rerank-test-proportion or --rerank-test-proportions, not both")
+    if args.rerank_test_proportions is None:
+        if args.rerank_test_proportion is None:
+            args.rerank_test_proportions = DEFAULT_RERANK_TEST_PROPORTIONS
+        else:
+            args.rerank_test_proportions = [args.rerank_test_proportion]
+    return args
 
 
 def main() -> None:

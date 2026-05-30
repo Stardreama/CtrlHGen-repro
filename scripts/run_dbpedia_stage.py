@@ -19,6 +19,7 @@ STAGES = {
     "s1": {"scale": "db50_s1000", "expected": {"train": 715, "valid": 78, "test": 78}},
     "s2": {"scale": "db50_s500", "expected": {"train": 1430, "valid": 169, "test": 169}},
     "s3": {"scale": "db50_s100", "expected": {"train": 7150, "valid": 884, "test": 884}},
+    "s4": {"scale": "db50_s50", "expected": {"train": 14313, "valid": 1781, "test": 1781}},
 }
 
 DEFAULT_STEPS = ["sample", "train_uncond", "train_pattern", "test_baseline", "test_rerank"]

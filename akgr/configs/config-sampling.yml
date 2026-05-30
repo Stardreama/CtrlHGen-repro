@@ -33,6 +33,9 @@ db50_s500:
 db50_s100:
   datasets: ["DBpedia50"]
   scale: 100
+db50_s50:
+  datasets: ["DBpedia50"]
+  scale: 50
 full:
   datasets: ["DBpedia50"]
   scale: 1

@@ -76,7 +76,7 @@ def train_loop(args, dataloader, model, tokenizer, optimizer, scheduler, model_n
             new_extract_sample_to_device_number_relation(device, sample, tokenizer, is_gpt, src_len, tgt_len, False) 
         elif args.condition == 'entitynumber':
             source, target, pattern_id, input_ids, attention_mask, labels, source_attention_mask, condition = \
-            new_extract_sample_to_device_pattern(device, sample, tokenizer, is_gpt, src_len, tgt_len, False)
+            new_extract_sample_to_device_number_entity(device, sample, tokenizer, is_gpt, src_len, tgt_len, False)
         elif args.condition == 'relation':
             source, target, pattern_id, input_ids, attention_mask, labels, source_attention_mask, condition = \
             new_extract_sample_to_device_specific_relation(device, sample, tokenizer, is_gpt, src_len, tgt_len, False)
@@ -143,7 +143,7 @@ def valid_loop(args, dataloader, model, tokenizer, graph_samplers,
                 new_extract_sample_to_device_number_relation(device, sample, tokenizer, is_gpt, src_len, tgt_len, False) 
             elif args.condition == 'entitynumber':
                 source, target, pattern_id, input_ids, attention_mask, labels, source_attention_mask, condition = \
-                new_extract_sample_to_device_pattern(device, sample, tokenizer, is_gpt, src_len, tgt_len, False)
+                new_extract_sample_to_device_number_entity(device, sample, tokenizer, is_gpt, src_len, tgt_len, False)
             elif args.condition == 'relation':
                 source, target, pattern_id, input_ids, attention_mask, labels, source_attention_mask, condition = \
                 new_extract_sample_to_device_specific_relation(device, sample, tokenizer, is_gpt, src_len, tgt_len, False)
@@ -335,16 +335,63 @@ def constrained_inference(args, model, input_ids, attention_mask, max_length,
         top_p=1.0,
         top_k=args.test_top_k,
         do_sample=True,
+        num_return_sequences=max(1, args.rerank_k),
         prefix_allowed_tokens_fn=prefix_allowed_tokens_fn,
         # logits_processor=prefix_constrained_logits_preprocessor
     )
     return output
 
+def repeat_each(items, repeat_count):
+    return [item for item in items for _ in range(repeat_count)]
+
+def get_condition_score_name(condition_name):
+    if condition_name in ['relation', 'entity']:
+        return 'spec'
+    if condition_name == 'entitynumber':
+        return 'enumber'
+    if condition_name == 'relationnumber':
+        return 'pnumber'
+    if condition_name == 'pattern':
+        return 'validity'
+    return None
+
+def rerank_reward(score, args):
+    semantic_score = score.get('jaccard', 0) + 0.5 * score.get('dice', 0) + 0.5 * score.get('overlap', 0)
+    condition_key = get_condition_score_name(args.condition)
+    condition_score = score.get(condition_key, 0) if condition_key is not None else 0
+    return args.rerank_alpha * semantic_score + (1 - args.rerank_alpha) * condition_score
+
+def select_reranked_predictions(pred_decoded, scores, args):
+    selected_pred = []
+    selected_scores = []
+    candidate_logs = []
+    rerank_k = max(1, args.rerank_k)
+    for sample_idx in range(len(pred_decoded) // rerank_k):
+        start = sample_idx * rerank_k
+        end = start + rerank_k
+        rewards = [rerank_reward(score, args) for score in scores[start:end]]
+        best_offset = max(range(rerank_k), key=lambda idx: rewards[idx])
+        best_idx = start + best_offset
+        selected_pred.append(pred_decoded[best_idx])
+        selected_scores.append(scores[best_idx])
+        for cand_offset, cand_idx in enumerate(range(start, end)):
+            candidate_logs.append({
+                'sample_idx': sample_idx,
+                'candidate_idx': cand_offset,
+                'selected': cand_idx == best_idx,
+                'reward': rewards[cand_offset],
+                'prediction': pred_decoded[cand_idx],
+                'scores': scores[cand_idx],
+            })
+    return selected_pred, selected_scores, candidate_logs
+
 def test_loop(args, dataloader, model, tokenizer, graph_samplers, searching_split, resume_epoch,
             is_gpt, is_act, src_len, tgt_len,
             accelerator,
-            score_file_suffix='test'):
+    score_file_suffix='test'):
     score_file_suffix = f'test|{args.test_proportion}x{args.test_split}_topk{args.test_top_k}_{args.constrained}_{args.test_count0}'
+    if args.rerank_k > 1:
+        score_file_suffix += f'_rerank{args.rerank_k}_alpha{args.rerank_alpha}'
     if args.rl_resume_epoch != 0:
         score_file_suffix += f'|{rl_suffix_name(args, args.rl_resume_epoch)}'
 
@@ -363,6 +410,10 @@ def test_loop(args, dataloader, model, tokenizer, graph_samplers, searching_spli
     scores_all = []
     pattern_id_all = []
     failures = []
+    candidate_log_path = os.path.join(args.result_root, args.modelname,
+        f'{args.dataname}-{args.scale}-{args.max_answer_size}-{resume_epoch}-candidates({score_file_suffix}).jsonl')
+    if args.rerank_log_candidates and (accelerator is None or accelerator.is_main_process):
+        open(candidate_log_path, 'w').close()
 
     # print('# tgt_len', tgt_len)
 
@@ -374,6 +425,7 @@ def test_loop(args, dataloader, model, tokenizer, graph_samplers, searching_spli
             if args.condition == 'unconditional':
                 source, target, pattern_id, input_ids, attention_mask, labels, source_attention_mask = \
                 new_extract_sample_to_device(device, sample, tokenizer, is_gpt, src_len, tgt_len, True)
+                condition = target
             elif args.condition == 'pattern':
                 source, target, pattern_id, input_ids, attention_mask, labels, source_attention_mask, condition = \
                 new_extract_sample_to_device_pattern(device, sample, tokenizer, is_gpt, src_len, tgt_len, True)
@@ -382,7 +434,7 @@ def test_loop(args, dataloader, model, tokenizer, graph_samplers, searching_spli
                 new_extract_sample_to_device_number_relation(device, sample, tokenizer, is_gpt, src_len, tgt_len, True) 
             elif args.condition == 'entitynumber':
                 source, target, pattern_id, input_ids, attention_mask, labels, source_attention_mask, condition = \
-                new_extract_sample_to_device_pattern(device, sample, tokenizer, is_gpt, src_len, tgt_len, True)
+                new_extract_sample_to_device_number_entity(device, sample, tokenizer, is_gpt, src_len, tgt_len, True)
             elif args.condition == 'relation':
                 source, target, pattern_id, input_ids, attention_mask, labels, source_attention_mask, condition = \
                 new_extract_sample_to_device_specific_relation(device, sample, tokenizer, is_gpt, src_len, tgt_len, True)
@@ -406,8 +458,50 @@ def test_loop(args, dataloader, model, tokenizer, graph_samplers, searching_spli
             # print('pred')
             # print(pred[:10])
 
-            if is_gpt: mask_source(device, source_attention_mask, pred, tokenizer)
+            if is_gpt:
+                expanded_source_attention_mask = source_attention_mask.repeat_interleave(max(1, args.rerank_k), dim=0)
+                mask_source(device, expanded_source_attention_mask, pred, tokenizer)
             pred_decoded = tokenizer.batch_decode(pred, skip_special_tokens=True)
+
+            scoring_fn = scoring_input_act_batch_condition if is_act else scoring_input_wordlist_batch
+            if args.condition ==  'relation' or args.condition == 'entity':
+                scoring_method=['smatch', 'precrecf1', 'jaccard','dice','overlap','tanimoto','validity','specific'] + ['count0'] * (args.test_count0 == True)
+            else:
+                scoring_method=['smatch', 'precrecf1', 'jaccard','dice','overlap','tanimoto','validity'] + ['count0'] * (args.test_count0 == True)
+            if args.rerank_k > 1:
+                expanded_target = repeat_each(target, args.rerank_k)
+                expanded_source = repeat_each(source, args.rerank_k)
+                expanded_condition = repeat_each(condition, args.rerank_k)
+                candidate_scores, _ = scoring_fn(
+                    pred_word_batch=pred_decoded,
+                    label_word_batch=expanded_target,
+                    ans_word_batch=expanded_source,
+                    condition_batch=expanded_condition,
+                    scoring_method=scoring_method,
+                    do_correction=args.do_correction,
+                    graph_samplers=graph_samplers,
+                    searching_split=searching_split,
+                    return_failures=True,
+                    verbose=args.vs)
+                pred_decoded, scores, candidate_logs = select_reranked_predictions(pred_decoded, candidate_scores, args)
+                failures_batch_id = []
+                if args.rerank_log_candidates and (accelerator is None or accelerator.is_main_process):
+                    with open(candidate_log_path, 'a') as candidate_file:
+                        for row in candidate_logs:
+                            row['batch_iter'] = iter
+                            candidate_file.write(json.dumps(row) + '\n')
+            else:
+                scores, failures_batch_id = scoring_fn(
+                    pred_word_batch=pred_decoded,
+                    label_word_batch=target,
+                    ans_word_batch=source,
+                    condition_batch=condition,
+                    scoring_method=scoring_method,
+                    do_correction=args.do_correction,
+                    graph_samplers=graph_samplers,
+                    searching_split=searching_split,
+                    return_failures=True,
+                    verbose=args.vs)
 
             print('source')
             print(source[:5])
@@ -417,23 +511,6 @@ def test_loop(args, dataloader, model, tokenizer, graph_samplers, searching_spli
             # print(input_ids)
             print('pred_de')
             print(pred_decoded[:5])
-
-            scoring_fn = scoring_input_act_batch_condition if is_act else scoring_input_wordlist_batch
-            if args.condition ==  'relation' or args.condition == 'entity':
-                scoring_method=['smatch', 'precrecf1', 'jaccard','dice','overlap','tanimoto','validity','specific'] + ['count0'] * (args.test_count0 == True)
-            else:
-                scoring_method=['smatch', 'precrecf1', 'jaccard','dice','overlap','tanimoto','validity'] + ['count0'] * (args.test_count0 == True)
-            scores, failures_batch_id = scoring_fn(
-                pred_word_batch=pred_decoded,
-                label_word_batch=target,
-                ans_word_batch=source,
-                condition_batch=condition,
-                scoring_method=scoring_method,
-                do_correction=args.do_correction,
-                graph_samplers=graph_samplers,
-                searching_split=searching_split,
-                return_failures=True,
-                verbose=args.vs)
             # print(scores)
             if accelerator is not None:
                 gathered_scores = [None] * accelerator.num_processes
@@ -775,10 +852,10 @@ def load_model_by_mode(args, device, model_name, is_gpt, config_model=None, ntok
     if args.mode in ['training', 'testing', 'optimizing'] and args.resume_epoch != 0:
         if args.tuning:
             resume_path = os.path.join(args.checkpoint_root, args.modelname, \
-                '{args.dataname}-{args.scale}-{args.max_answer_size}-{args.resume_epoch}-{args.condition}.pth')
+                f'{args.dataname}-{args.scale}-{args.max_answer_size}-{args.resume_epoch}-{args.condition}.pth')
         else:
             resume_path = os.path.join(args.checkpoint_root, args.modelname, \
-                '{args.dataname}-{args.scale}-{args.max_answer_size}-{args.resume_epoch}-unconditional.pth')
+                f'{args.dataname}-{args.scale}-{args.max_answer_size}-{args.resume_epoch}-unconditional.pth')
 
         print(f'Loading model: {resume_path}')
         model, optimizer, scheduler, last_epoch, loss_log = \
@@ -856,6 +933,7 @@ def my_parse_args():
     parser.add_argument('--config-model', default='akgr/configs/config-model.yml')
     parser.add_argument('--config-batchsize', default='akgr/configs/config-batchsize.yml')
     parser.add_argument('--overwrite_batchsize', type=int, default=0)
+    parser.add_argument('--override_nepoch', type=int, default=0)
 
     # Data
     parser.add_argument('--data_root', default='./sampling/')
@@ -877,6 +955,9 @@ def my_parse_args():
     parser.add_argument('--test_split', default='test')
     parser.add_argument('--test_top_k', type=int, default=0)
     parser.add_argument('--test_count0', action='store_true')
+    parser.add_argument('--rerank_k', type=int, default=1)
+    parser.add_argument('--rerank_alpha', type=float, default=0.5)
+    parser.add_argument('--rerank_log_candidates', action='store_true')
     parser.add_argument('--result_root', default='./results/')
 
     parser.add_argument('--save_frequency', type=int, default=1)
@@ -1013,6 +1094,8 @@ def main():
     else:
         config_train = config_train['default']
         warnings.warn(f'No training configuration specified for {model_name}')
+    if args.override_nepoch > 0:
+        config_train['nepoch'] = args.override_nepoch
     print(f'config_train:\n{config_train}')
 
     if args.mode == 'training':

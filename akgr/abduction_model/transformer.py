@@ -22,6 +22,16 @@ from akgr.abduction_model.t5 import myT5
 # from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments
 # from transformers import DataCollatorForLanguageModeling
 
+def create_gpt2_config(common_config: dict):
+    config_kwargs = dict(common_config)
+    if 'num_layers' in config_kwargs:
+        config_kwargs['n_layer'] = config_kwargs.pop('num_layers')
+    config_kwargs.setdefault('n_embd', 256)
+    config_kwargs.setdefault('n_head', 4)
+    config_kwargs.setdefault('n_positions', 256)
+    config_kwargs.setdefault('n_ctx', config_kwargs['n_positions'])
+    return GPT2Config(**config_kwargs)
+
 def create_transformer(ntoken: int, special_tokens: dict,
         model_name: str, config_model: dict):
 
@@ -64,11 +74,7 @@ def create_transformer(ntoken: int, special_tokens: dict,
         else:
             return None
     elif 'GPT2' in model_name:
-        # default = huggingface gpt2 = the smallest version of GPT-2, with 124M parameters.
-        config = GPT2Config.from_pretrained(
-            './hug_model',
-            **common_config
-        )
+        config = create_gpt2_config(common_config)
         if 'GPT2_6' in model_name:
             transformer = GPT2LMHeadModel(config)
         else:
@@ -129,11 +135,7 @@ class TransformerModel(nn.Module):
             else:
                 return None
         elif 'GPT2' in model_name:
-            # default = huggingface gpt2 = the smallest version of GPT-2, with 124M parameters.
-            self.config = GPT2Config.from_pretrained(
-                './hug_model',
-                **common_config
-            )
+            self.config = create_gpt2_config(common_config)
             # if model_name == 'GPT2-disable-pos':
             #     #self.transformer = myGPT2LM(self.config)
             #     self.transformer = GPT2LMHeadModel(self.config)

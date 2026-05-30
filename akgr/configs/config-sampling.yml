@@ -14,6 +14,19 @@ debug:
     "train": 16
     "valid": 2
     "test": 2
+debug_wn18rr:
+  datasets: ["WN18RR"]
+  scale: 5000
+  "WN18RR":
+    "train": 16
+    "valid": 2
+    "test": 2
+db50_s5000:
+  datasets: ["DBpedia50"]
+  scale: 5000
+db50_s1000:
+  datasets: ["DBpedia50"]
+  scale: 1000
 full:
   datasets: ["DBpedia50"]
   scale: 1

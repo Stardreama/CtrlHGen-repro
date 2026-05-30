@@ -217,7 +217,7 @@ def new_extract_sample_to_device(device,
     labels[labels == tokenizer.pad_token_id] = -100
     source_attention_mask = source_tokenized.attention_mask
 
-    return source, target, pattern_id, input_ids, attention_mask, labels, source_attention_mask, target
+    return source, target, pattern_id, input_ids, attention_mask, labels, source_attention_mask
 
 def new_extract_sample_to_device_search(device,
         sample, tokenizer,graph, is_gpt:bool,

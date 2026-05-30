@@ -180,13 +180,7 @@ def load_fb15k237_ent_2idname(ent_id2name):
     # https://huggingface.co/datasets/KGraph/FB15k-237/resolve/main/data/FB15k_mid2name.txt
 
 def load_wn18rr_ent_id2name(ent_id2name):
-    # https://stackoverflow.com/questions/8077641/how-to-get-the-wordnet-synset-given-an-offset-id
-    import nltk
-    nltk.download('wordnet')
-    from nltk.corpus import wordnet
-    for id, name in ent_id2name.items():
-        ent_id2name[id] = wordnet.synset_from_pos_and_offset('n',int(name))
-    return ent_id2name
+    return {id: str(name) for id, name in ent_id2name.items()}
 
 from akgr.kgdata.kgclass import GraphSampler, KG
 def load_kg(dataname, reverse_edges_flag=True, id_map_only=False):
@@ -205,6 +199,7 @@ def load_kg(dataname, reverse_edges_flag=True, id_map_only=False):
         raw_kg_dict['ent_id2name'] = load_wn18rr_ent_id2name(raw_kg_dict['ent_id2name'])
     
     path = f'./sampled_data/{dataname}/{dataname}.pkl'
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     if os.path.exists(path):
         kg =load_kg_from_disk(path)
         

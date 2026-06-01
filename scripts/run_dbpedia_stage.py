@@ -12,6 +12,7 @@ import shlex
 import subprocess
 import sys
 from pathlib import Path
+from typing import Optional
 
 
 STAGES = {
@@ -26,6 +27,21 @@ STAGES = {
 
 DEFAULT_STEPS = ["sample", "train_uncond", "train_pattern", "test_baseline", "test_rerank"]
 DEFAULT_RERANK_TEST_PROPORTIONS = [0.1, 0.25, 1.0]
+DEFAULT_CHECKPOINT_ROOT = "checkpoints/"
+DEFAULT_RESULT_ROOT = "./results/"
+DEFAULT_BATCH_SIZE = 32
+DEFAULT_SAVE_FREQUENCY = 10
+DEFAULT_UNCOND_EPOCHS = 20
+DEFAULT_PATTERN_EPOCHS = 40
+PAPER_CHECKPOINT_ROOT = "checkpoints_paper/"
+PAPER_RESULT_ROOT = "./results_paper/"
+PAPER_BATCH_SIZE = 256
+PAPER_SAVE_FREQUENCY = 20
+PAPER_UNCOND_EPOCHS = 400
+PAPER_PATTERN_EPOCHS = 450
+PAPER_LR = 1e-5
+PAPER_UNCOND_WARM_UP = 50
+PAPER_PATTERN_WARM_UP = 5
 
 
 def shell_join(cmd: list[str]) -> str:
@@ -104,6 +120,7 @@ def maybe_skip(label: str, paths: list[Path], force: bool) -> bool:
 def build_common_model_args(args: argparse.Namespace, scale: str) -> list[str]:
     return [
         "--modelname", args.modelname,
+        "--config-train", args.config_train,
         "--data_root", args.data_root,
         "-d", args.dataname,
         "--scale", scale,
@@ -111,6 +128,16 @@ def build_common_model_args(args: argparse.Namespace, scale: str) -> list[str]:
         "--checkpoint_root", args.checkpoint_root,
         "--result_root", args.result_root,
     ]
+
+
+def append_train_overrides(cmd: list[str], lr: Optional[float], warm_up: Optional[int], step_scheduler: bool) -> list[str]:
+    if lr is not None:
+        cmd.extend(["--override_lr", str(lr)])
+    if warm_up is not None:
+        cmd.extend(["--override_warm_up", str(warm_up)])
+    if step_scheduler:
+        cmd.append("--step_scheduler_each_epoch")
+    return cmd
 
 
 def run_sample(args: argparse.Namespace, scale: str) -> None:
@@ -130,7 +157,7 @@ def run_train_uncond(args: argparse.Namespace, scale: str) -> None:
     out = checkpoint_path(args, scale, args.uncond_epochs, "unconditional")
     if maybe_skip("train_uncond", [out], args.force):
         return
-    run([
+    cmd = [
         sys.executable, "-m", "akgr.abduction_model.main",
         *build_common_model_args(args, scale),
         "--mode", "training",
@@ -138,14 +165,16 @@ def run_train_uncond(args: argparse.Namespace, scale: str) -> None:
         "--overwrite_batchsize", str(args.batch_size),
         "--save_frequency", str(args.save_frequency),
         "--override_nepoch", str(args.uncond_epochs),
-    ], args.dry_run)
+    ]
+    append_train_overrides(cmd, args.uncond_lr, args.uncond_warm_up, args.step_scheduler_each_epoch)
+    run(cmd, args.dry_run)
 
 
 def run_train_pattern(args: argparse.Namespace, scale: str) -> None:
     out = checkpoint_path(args, scale, args.pattern_epochs, "pattern")
     if maybe_skip("train_pattern", [out], args.force):
         return
-    run([
+    cmd = [
         sys.executable, "-m", "akgr.abduction_model.main",
         *build_common_model_args(args, scale),
         "--mode", "training",
@@ -154,7 +183,11 @@ def run_train_pattern(args: argparse.Namespace, scale: str) -> None:
         "--overwrite_batchsize", str(args.batch_size),
         "--save_frequency", str(args.save_frequency),
         "--override_nepoch", str(args.pattern_epochs),
-    ], args.dry_run)
+    ]
+    append_train_overrides(cmd, args.pattern_lr, args.pattern_warm_up, args.step_scheduler_each_epoch)
+    if args.reset_pattern_optimizer:
+        cmd.append("--reset_optimizer_on_resume")
+    run(cmd, args.dry_run)
 
 
 def run_test_baseline(args: argparse.Namespace, scale: str) -> None:
@@ -211,9 +244,40 @@ def print_stage_info(args: argparse.Namespace, scale: str) -> None:
     print(f"# Expected rows: train={expected['train']}, valid={expected['valid']}, test={expected['test']}")
     print(f"# Steps: {', '.join(args.steps)}")
     print(f"# Epochs: unconditional={args.uncond_epochs}, pattern={args.pattern_epochs}")
+    print(f"# Roots: checkpoints={args.checkpoint_root}, results={args.result_root}")
+    print(f"# Train: batch_size={args.batch_size}, uncond_lr={args.uncond_lr}, pattern_lr={args.pattern_lr}, uncond_warm_up={args.uncond_warm_up}, pattern_warm_up={args.pattern_warm_up}")
     print(f"# Test: baseline proportion={args.baseline_test_proportion}, rerank proportions={format_proportions(args.rerank_test_proportions)}, rerank_k={args.rerank_k}")
     if args.dry_run:
         print("# Dry run: commands will be printed only")
+
+
+def apply_paper_supervised_defaults(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
+    if not args.paper_supervised:
+        return
+    if args.stage != "s6":
+        parser.error("--paper-supervised is intended for --stage s6")
+    if args.checkpoint_root == DEFAULT_CHECKPOINT_ROOT:
+        args.checkpoint_root = PAPER_CHECKPOINT_ROOT
+    if args.result_root == DEFAULT_RESULT_ROOT:
+        args.result_root = PAPER_RESULT_ROOT
+    if args.batch_size == DEFAULT_BATCH_SIZE:
+        args.batch_size = PAPER_BATCH_SIZE
+    if args.save_frequency == DEFAULT_SAVE_FREQUENCY:
+        args.save_frequency = PAPER_SAVE_FREQUENCY
+    if args.uncond_epochs == DEFAULT_UNCOND_EPOCHS:
+        args.uncond_epochs = PAPER_UNCOND_EPOCHS
+    if args.pattern_epochs == DEFAULT_PATTERN_EPOCHS:
+        args.pattern_epochs = PAPER_PATTERN_EPOCHS
+    if args.uncond_lr is None:
+        args.uncond_lr = PAPER_LR
+    if args.pattern_lr is None:
+        args.pattern_lr = PAPER_LR
+    if args.uncond_warm_up is None:
+        args.uncond_warm_up = PAPER_UNCOND_WARM_UP
+    if args.pattern_warm_up is None:
+        args.pattern_warm_up = PAPER_PATTERN_WARM_UP
+    args.reset_pattern_optimizer = True
+    args.step_scheduler_each_epoch = True
 
 
 def parse_args() -> argparse.Namespace:
@@ -221,16 +285,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--stage", choices=sorted(STAGES), default="s3")
     parser.add_argument("--steps", nargs="+", choices=DEFAULT_STEPS, default=DEFAULT_STEPS)
     parser.add_argument("--modelname", default="GPT2_6_act_nt")
+    parser.add_argument("--config-train", default="akgr/configs/config-train.yml")
     parser.add_argument("--dataname", default="DBpedia50")
     parser.add_argument("--data-root", default="./sampled_data/")
-    parser.add_argument("--checkpoint-root", default="checkpoints/")
-    parser.add_argument("--result-root", default="./results/")
+    parser.add_argument("--checkpoint-root", default=DEFAULT_CHECKPOINT_ROOT)
+    parser.add_argument("--result-root", default=DEFAULT_RESULT_ROOT)
     parser.add_argument("--max-answer-size", type=int, default=32)
     parser.add_argument("--workers", type=int, default=8)
-    parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--save-frequency", type=int, default=10)
-    parser.add_argument("--uncond-epochs", type=int, default=20)
-    parser.add_argument("--pattern-epochs", type=int, default=40)
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    parser.add_argument("--save-frequency", type=int, default=DEFAULT_SAVE_FREQUENCY)
+    parser.add_argument("--uncond-epochs", type=int, default=DEFAULT_UNCOND_EPOCHS)
+    parser.add_argument("--pattern-epochs", type=int, default=DEFAULT_PATTERN_EPOCHS)
+    parser.add_argument("--uncond-lr", type=float, default=None)
+    parser.add_argument("--pattern-lr", type=float, default=None)
+    parser.add_argument("--uncond-warm-up", type=int, default=None)
+    parser.add_argument("--pattern-warm-up", type=int, default=None)
+    parser.add_argument("--reset-pattern-optimizer", action="store_true")
+    parser.add_argument("--step-scheduler-each-epoch", action="store_true")
+    parser.add_argument("--paper-supervised", action="store_true", help="use paper-like supervised defaults for DBpedia50 full")
     parser.add_argument("--baseline-test-proportion", type=float, default=1.0)
     parser.add_argument("--rerank-test-proportion", type=float, default=None, help="deprecated single rerank proportion override")
     parser.add_argument("--rerank-test-proportions", nargs="+", type=float, default=None)
@@ -246,6 +318,7 @@ def parse_args() -> argparse.Namespace:
             args.rerank_test_proportions = DEFAULT_RERANK_TEST_PROPORTIONS
         else:
             args.rerank_test_proportions = [args.rerank_test_proportion]
+    apply_paper_supervised_defaults(args, parser)
     return args
 
 

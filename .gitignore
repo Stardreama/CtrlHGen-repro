@@ -4,8 +4,10 @@ __pycache__/
 .ipynb_checkpoints/
 
 checkpoints/
+checkpoints_paper/
 sampled_data/
 results/
+results_paper/
 wandb/
 
 dataloader.pt

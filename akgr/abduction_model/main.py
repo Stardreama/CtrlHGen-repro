@@ -206,7 +206,7 @@ def fit(args, nepoch, dataloader, model, tokenizer, optimizer, scheduler, graph_
         #     graph_samplers,
         #     is_gpt, is_act, src_len, tgt_len,
         #     verbose)
-        if ('-5' in model_name or '-01' in model_name):
+        if args.step_scheduler_each_epoch or ('-5' in model_name or '-01' in model_name):
             scheduler.step()
         # exit()
         loss_log['train'][epoch] = loss_train
@@ -862,6 +862,13 @@ def load_model_by_mode(args, device, model_name, is_gpt, config_model=None, ntok
             load_model(resume_path, 'model', args.resume_epoch, return_huggingface_model=True)
         # last_epoch=0
         model.to(device)
+        if args.mode == 'training' and args.reset_optimizer_on_resume:
+            optimizer = torch.optim.Adam(model.parameters(),
+                lr=float(config_train["lr"]))
+            scheduler = torch.optim.lr_scheduler.LinearLR(optimizer,
+                start_factor=0.1, total_iters=config_train["warm_up"])
+            loss_log = {'train': {}, 'valid': {}}
+
         # Overwrite model name
         model.model_name = model_name
 
@@ -934,6 +941,10 @@ def my_parse_args():
     parser.add_argument('--config-batchsize', default='akgr/configs/config-batchsize.yml')
     parser.add_argument('--overwrite_batchsize', type=int, default=0)
     parser.add_argument('--override_nepoch', type=int, default=0)
+    parser.add_argument('--override_lr', type=float, default=0)
+    parser.add_argument('--override_warm_up', type=int, default=0)
+    parser.add_argument('--reset_optimizer_on_resume', action='store_true')
+    parser.add_argument('--step_scheduler_each_epoch', action='store_true')
 
     # Data
     parser.add_argument('--data_root', default='./sampling/')
@@ -1096,6 +1107,10 @@ def main():
         warnings.warn(f'No training configuration specified for {model_name}')
     if args.override_nepoch > 0:
         config_train['nepoch'] = args.override_nepoch
+    if args.override_lr > 0:
+        config_train['lr'] = args.override_lr
+    if args.override_warm_up > 0:
+        config_train['warm_up'] = args.override_warm_up
     print(f'config_train:\n{config_train}')
 
     if args.mode == 'training':

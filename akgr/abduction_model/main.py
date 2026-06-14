@@ -538,18 +538,20 @@ from trl import (PPOTrainer, PPOConfig,
     AutoModelForCausalLMWithValueHead, AutoModelForSeq2SeqLMWithValueHead,
     create_reference_model,GRPOConfig, GRPOTrainer)
 def rl_suffix_name(args, iter):
-    name = f'ppo_{args.ppo_lr}'\
-            + f'_{args.ppo_smatch_factor}'\
-            + f'_{args.ppo_init_kl_coef}'\
-            + f'_{args.ppo_cliprange}'\
-            + f'_{args.ppo_minibatch}'\
-            + f'_{args.ppo_horizon}'\
-            + (f'_{args.ppo_epochs}' if args.ppo_epochs != 4 else '')\
-            + (f'_{args.ppo_share_embed_layer}' if args.ppo_share_embed_layer else '')\
-            + ('_nodecay' if args.ppo_lr_no_decay else '')\
-            + ('_peft' if args.ppo_use_peft else '')\
-            + (f'_s{args.ppo_search_split}' if args.ppo_search_split != 'train' else '')\
-            + f'x{args.ppo_proportion}'\
+    rl_factor = str(args.rl_factor).replace(' ', '')
+    name = f'{args.rl_type.lower()}_{args.rl_lr}'\
+            + f'_{args.rl_smatch_factor}'\
+            + f'_{args.rl_init_kl_coef}'\
+            + f'_{args.rl_cliprange}'\
+            + f'_{args.rl_minibatch}'\
+            + f'_{args.rl_horizon}'\
+            + (f'_{args.rl_epochs}' if args.rl_epochs != 4 else '')\
+            + (f'_{args.rl_share_embed_layer}' if args.rl_share_embed_layer else '')\
+            + ('_nodecay' if args.rl_lr_no_decay else '')\
+            + ('_peft' if args.rl_use_peft else '')\
+            + (f'_s{args.rl_search_split}' if args.rl_search_split != 'train' else '')\
+            + f'x{args.rl_proportion}'\
+            + f'_f{rl_factor}'\
             + f'-{iter}'
     return name
 def reward_fn(args, score:dict):

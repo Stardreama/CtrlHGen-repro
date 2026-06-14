@@ -19,7 +19,7 @@ from akgr.abduction_model.transformer import create_transformer
 
 # utils
 from akgr.utils.stat_util import stat_scores_by_pattern#, initialize_scores_stat
-from akgr.utils.load_util import load_yaml, load_model, save_model, load_and_filter_query_patterns
+from akgr.utils.load_util import load_yaml, load_model, save_model, load_and_filter_query_patterns, install_model_tag_pickle_compat
 from akgr.kgdata import load_kg
 import pandas as pd
 
@@ -829,10 +829,7 @@ def optimize_gpro(args, dataset, model, tokenizer, graph_sampler, batch_size,
     rl_factor = eval(args.rl_factor)
 
     model.warnings_issued = {}
-    def dummy_add_model_tags(self, tags):
-        pass
-
-    model.add_model_tags = dummy_add_model_tags.__get__(model)
+    install_model_tag_pickle_compat()
     trainer = GRPOTrainer(
         args=grpo_config,
         model=model,

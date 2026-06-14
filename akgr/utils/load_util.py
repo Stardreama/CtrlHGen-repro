@@ -115,6 +115,15 @@ def jsonl_2_pickle(data_root, dataname, scale, answer_size,
 import torch
 import torch.nn as nn
 import transformers
+
+def install_model_tag_pickle_compat():
+    def dummy_add_model_tags(self, tags):
+        pass
+
+    transformers.PreTrainedModel.dummy_add_model_tags = dummy_add_model_tags
+    if not hasattr(transformers.PreTrainedModel, 'add_model_tags'):
+        transformers.PreTrainedModel.add_model_tags = dummy_add_model_tags
+
 def load_model(path, contents:str, epoch,
                return_huggingface_model:bool,
                model=None, optimizer=None, scheduler=None):
@@ -148,12 +157,11 @@ def load_model(path, contents:str, epoch,
         if model is not None or optimizer is not None or scheduler is not None:
             print('# Error: cannot pass model, optimizer, scheduler with contents="model"')
             exit()
+        install_model_tag_pickle_compat()
         checkpoint = torch.load(path,weights_only=False)
         model = checkpoint['model']
         model.warnings_issued = {}  # 重新添加属性
-        def dummy_add_model_tags(self, tags):
-            pass
-        model.add_model_tags = dummy_add_model_tags.__get__(model)  # 重新绑定方法
+        install_model_tag_pickle_compat()
         optimizer = checkpoint['optimizer']
         scheduler = checkpoint['scheduler']
     else:

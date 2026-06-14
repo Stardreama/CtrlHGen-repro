@@ -975,7 +975,7 @@ def my_parse_args():
 
     # rl
     parser.add_argument('--rl_type', default='GRPO')
-    parser.add_argument('--rl_resume_epoch', default=0)
+    parser.add_argument('--rl_resume_epoch', type=int, default=0)
     parser.add_argument('--rl_proportion', type=float, default=1)
     parser.add_argument('--rl_smatch_factor', type=float, default=0)
     parser.add_argument('--rl_init_kl_coef', type=float, default=0.2)
